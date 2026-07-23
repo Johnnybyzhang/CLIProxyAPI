@@ -32,13 +32,12 @@ type ClaudeUsageSnapshot struct {
 	ThinkingTokens int64
 }
 
-// ClaudeThinkingTokenCountEmitter produces the per-block cumulative
-// estimated_tokens values used by Anthropic's thinking-token-count streaming beta.
+// ClaudeThinkingTokenCountEmitter produces the per-frame estimated_tokens
+// increments used by Anthropic's thinking-token-count streaming beta.
 type ClaudeThinkingTokenCountEmitter struct {
 	enabled               bool
 	thinkingBlockOpen     bool
 	thinkingBlockIndex    int64
-	thinkingBlockBase     int64
 	emittedThinkingTokens int64
 }
 
@@ -122,7 +121,6 @@ func (e *ClaudeThinkingTokenCountEmitter) ObserveTranslatedChunks(chunks [][]byt
 				if event.Get("content_block.type").String() == "thinking" {
 					e.thinkingBlockOpen = true
 					e.thinkingBlockIndex = event.Get("index").Int()
-					e.thinkingBlockBase = e.emittedThinkingTokens
 				}
 			case "content_block_stop":
 				if e.thinkingBlockOpen && event.Get("index").Int() == e.thinkingBlockIndex {
@@ -143,8 +141,7 @@ func (e *ClaudeThinkingTokenCountEmitter) Event(snapshot ClaudeUsageSnapshot) []
 		return nil
 	}
 	e.emittedThinkingTokens += increment
-	blockEstimate := e.emittedThinkingTokens - e.thinkingBlockBase
-	return []byte(fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"\",\"estimated_tokens\":%d}}\n\n", e.thinkingBlockIndex, blockEstimate))
+	return []byte(fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"\",\"estimated_tokens\":%d}}\n\n", e.thinkingBlockIndex, increment))
 }
 
 func ClaudeApplyMessageStartUsage(chunks [][]byte, snapshot ClaudeUsageSnapshot) bool {

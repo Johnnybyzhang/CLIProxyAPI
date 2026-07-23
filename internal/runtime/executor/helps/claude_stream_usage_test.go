@@ -235,7 +235,7 @@ func TestClaudeThinkingTokenCountEmitter(t *testing.T) {
 		t.Fatalf("delta type = %q, want thinking_delta; event=%s", got, event)
 	}
 	if got := gjson.GetBytes(data, "delta.estimated_tokens").Int(); got != 128 {
-		t.Fatalf("estimated token total = %d, want 128; event=%s", got, event)
+		t.Fatalf("estimated token increment = %d, want 128; event=%s", got, event)
 	}
 	if got := gjson.GetBytes(data, "delta.thinking").String(); got != "" {
 		t.Fatalf("thinking = %q, want empty", got)
@@ -244,8 +244,8 @@ func TestClaudeThinkingTokenCountEmitter(t *testing.T) {
 	if event = emitter.Event(ClaudeUsageSnapshot{ThinkingTokens: 190}); len(event) != 0 {
 		t.Fatalf("sub-quantum progress emitted an event: %s", event)
 	}
-	if event = emitter.Event(ClaudeUsageSnapshot{ThinkingTokens: 260}); gjson.GetBytes(claudeSSEEventData(event), "delta.estimated_tokens").Int() != 256 {
-		t.Fatalf("second estimated token event = %s, want cumulative 256", event)
+	if event = emitter.Event(ClaudeUsageSnapshot{ThinkingTokens: 260}); gjson.GetBytes(claudeSSEEventData(event), "delta.estimated_tokens").Int() != 128 {
+		t.Fatalf("second estimated token event = %s, want increment 128", event)
 	}
 
 	emitter.ObserveTranslatedChunks([][]byte{[]byte("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":3}\n\n")})
@@ -255,7 +255,7 @@ func TestClaudeThinkingTokenCountEmitter(t *testing.T) {
 
 	emitter.ObserveTranslatedChunks([][]byte{[]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":4,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n")})
 	if event = emitter.Event(ClaudeUsageSnapshot{ThinkingTokens: 390}); gjson.GetBytes(claudeSSEEventData(event), "delta.estimated_tokens").Int() != 128 {
-		t.Fatalf("new block estimated token event = %s, want block-local cumulative 128", event)
+		t.Fatalf("new block estimated token event = %s, want increment 128", event)
 	}
 
 	t.Run("disabled", func(t *testing.T) {
@@ -265,4 +265,22 @@ func TestClaudeThinkingTokenCountEmitter(t *testing.T) {
 			t.Fatalf("disabled emitter produced an event: %s", event)
 		}
 	})
+}
+
+func TestClaudeThinkingTokenCountEmitterIncrementsDoNotAccumulateQuadratically(t *testing.T) {
+	emitter := NewClaudeThinkingTokenCountEmitter(true)
+	emitter.ObserveTranslatedChunks([][]byte{[]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n")})
+
+	var emitted int64
+	for total := claudeThinkingTokenQuantum; total <= 7_424; total += claudeThinkingTokenQuantum {
+		event := emitter.Event(ClaudeUsageSnapshot{ThinkingTokens: total})
+		increment := gjson.GetBytes(claudeSSEEventData(event), "delta.estimated_tokens").Int()
+		if increment != claudeThinkingTokenQuantum {
+			t.Fatalf("estimated token increment at total %d = %d, want %d", total, increment, claudeThinkingTokenQuantum)
+		}
+		emitted += increment
+	}
+	if emitted != 7_424 {
+		t.Fatalf("summed estimated token increments = %d, want 7424", emitted)
+	}
 }
